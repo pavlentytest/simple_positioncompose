@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Bundle
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -20,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +34,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.myapplication.ui.theme.MyApplicationTheme
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 
@@ -42,7 +47,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                   LocationWithPermission()
+                   LiveLocationDemo()
                 }
             }
         }
@@ -50,89 +55,38 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun LocationWithPermission() {
+fun LiveLocationDemo() {
     val context = LocalContext.current
     val locationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    var currentLocation by remember { mutableStateOf<Location?>(null) }
 
-    var location by remember { mutableStateOf<Location?>(null) }
-    var permissionGranted by remember { mutableStateOf(false) }
-    var shouldShowRationale by remember { mutableStateOf(false) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-
-        permissionGranted = fineGranted || coarseGranted
-        shouldShowRationale = !permissionGranted &&
-                (ActivityCompat.shouldShowRequestPermissionRationale(
-                    context as Activity,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ) ||
-                        ActivityCompat.shouldShowRequestPermissionRationale(
-                            context as Activity,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        ))
+    val locationCallback = remember {
+        object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                currentLocation = result.lastLocation
+            }
+        }
     }
 
-    LaunchedEffect(Unit) {
-        permissionGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
+
+    DisposableEffect(Unit) {
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
+            .setMinUpdateIntervalMillis(2000)
+            .build()
+
+        locationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+
+        onDispose {
+            locationClient.removeLocationUpdates(locationCallback)
+        }
     }
 
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        if (permissionGranted) {
-            Column {
-                Button(onClick = {
-                    locationClient.getCurrentLocation(
-                        Priority.PRIORITY_HIGH_ACCURACY,
-                        null
-                    ).addOnSuccessListener { loc ->
-                        location = loc
-                    }.addOnFailureListener { e ->
-
-                    }
-                }) {
-                    Text("Получить точную локацию")
-                }
-                location?.let {
-                    Text("Текущая: ${it.latitude}, ${it.longitude}")
-                }
-            }
-        } else {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Приложению нужен доступ к местоположению")
-
-                if (shouldShowRationale) {
-                    Text(
-                        "Это нужно для показа ближайших мест / погоды и т.д.",
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Button(onClick = {
-                    permissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
-                    )
-                }) {
-                    Text("Дать разрешение")
-                }
-            }
+    currentLocation?.let {
+        Text("Live: ${it.latitude}, ${it.longitude}")
+    } ?: Text("Ожидание локации...")
         }
-    }
 }
